@@ -1,0 +1,241 @@
+command: "ps -A -o %cpu | awk '{s+=$1} END {print s}'",
+
+refreshFrequency: 100,
+
+style: `#footballContainer {
+    position: fixed;
+    width: 100vw;
+    height: 100vh;
+    left: 0;
+    top: 0;
+    pointer-events: none;
+    z-index: 9998;
+}
+
+.football {
+    position: absolute;
+    font-size: 24px;
+    will-change: transform;
+    user-select: none;
+    transition: none;
+}
+
+/* CPU Bar Styles */
+.widget {
+    position: fixed;
+    bottom: 45px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    pointer-events: auto;
+}
+
+.glass {
+    backdrop-filter: blur(20px);
+    background: rgba(255,255,255,0.08);
+    border-radius: 18px;
+    padding: 10px 18px;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+    position: relative;
+    min-height: 60px;
+}
+
+.bar {
+    width: 6px;
+    height: 0px;
+    border-radius: 10px;
+    margin: 0 3px;
+    transition: height 0.15s ease-out, opacity 0.15s ease-out;
+}`,
+
+render: function() {
+    // Create CPU bars
+    const ARRAYSIZE = 40;
+    let bars = '';
+    for (let i = 0; i <= ARRAYSIZE; i++) {
+        bars += `<div class='bar graph${i}'></div>`;
+    }
+    
+    return `
+        <div id="footballContainer"></div>
+        <div class='widget'>
+            <div class='glass' id="cpuGlass">
+                ${bars}
+            </div>
+        </div>
+    `;
+},
+
+update: function(output, domEl) {
+    // CPU Bar Logic
+    const ARRAYSIZE = 40;
+    const barColor = "rgba(255,255,255,0.9)";
+    
+    // Initialize Values array if not exists
+    if (!this.Values) {
+        this.Values = new Array(ARRAYSIZE + 1).fill(0);
+    }
+    
+    let cpuOutput = Math.max(5, Math.min(parseFloat(output) || 50, 100));
+    this.Values = [cpuOutput].concat(this.Values.slice(0, -1));
+    
+    // Update CPU bars
+    for (let i = 0; i <= ARRAYSIZE; i++) {
+        const el = domEl.querySelector(`.graph${i}`);
+        if (el) {
+            const val = this.Values[i] || 0;
+            el.style.height = `${val / 2}px`;
+            el.style.background = barColor;
+            el.style.opacity = 0.4 + val / 200;
+        }
+    }
+    
+    // Football Logic
+    const container = domEl.querySelector('#footballContainer');
+    
+    // Initialize footballs if not done
+    if (!this.footballsInitialized) {
+        this.footballsInitialized = true;
+        this.footballs = [];
+        this.createFootballs(container);
+        this.startPhysicsLoop(domEl);
+    }
+},
+
+createFootballs: function(container) {
+    for (let i = 0; i < 50; i++) {
+        const football = document.createElement('div');
+        football.className = 'football';
+        football.textContent = Math.random() < 0.8 ? '⚽︎' : '⚽︎';
+        
+        const size = Math.random() * 25 + 15;
+        const x = Math.random() * window.innerWidth;
+        const y = Math.random() * -window.innerHeight;
+        const speedY = Math.random() * 2 + 1;
+        const speedX = (Math.random() - 0.5) * 2;
+        const rotation = Math.random() * 360;
+        const rotationSpeed = (Math.random() - 0.5) * 5;
+        const opacity = Math.random() * 0.5 + 0.3;
+        
+        football.style.cssText = `
+            font-size: ${size}px;
+            left: ${x}px;
+            top: ${y}px;
+            opacity: ${opacity};
+        `;
+        
+        container.appendChild(football);
+        
+        this.footballs.push({
+            element: football,
+            x: x,
+            y: y,
+            speedY: speedY,
+            speedX: speedX,
+            size: size,
+            rotation: rotation,
+            rotationSpeed: rotationSpeed,
+            opacity: opacity
+        });
+    }
+},
+
+startPhysicsLoop: function(domEl) {
+    const physicsLoop = () => {
+        const glass = domEl.querySelector('#cpuGlass');
+        if (!glass) {
+            requestAnimationFrame(physicsLoop);
+            return;
+        }
+        
+        const glassRect = glass.getBoundingClientRect();
+        const windowHeight = window.innerHeight;
+        const windowWidth = window.innerWidth;
+        
+        // Physics constants
+        const gravity = 0.15;
+        const bounceDamping = 0.6;
+        const glassBounceBoost = -5; // Extra bounce off the CPU bar
+        
+        this.footballs.forEach(ball => {
+            // Apply physics
+            ball.speedY += gravity;
+            ball.y += ball.speedY;
+            ball.x += ball.speedX;
+            ball.rotation += ball.rotationSpeed;
+            
+            // Check collision with CPU glass bar
+            if (ball.y + ball.size > glassRect.top && 
+                ball.y < glassRect.bottom &&
+                ball.x + ball.size > glassRect.left && 
+                ball.x < glassRect.right) {
+                
+                // Bounce off the top of the glass
+                if (ball.y + ball.size > glassRect.top && ball.y < glassRect.top) {
+                    ball.y = glassRect.top - ball.size;
+                    ball.speedY = glassBounceBoost;
+                    
+                    // Add horizontal bounce effect
+                    const hitPosition = (ball.x - glassRect.left) / glassRect.width;
+                    ball.speedX += (hitPosition - 0.5) * 3;
+                    
+                    // Visual feedback - flash the bar
+                    this.flashBar(domEl, hitPosition);
+                }
+            }
+            
+            // Wall bouncing
+            if (ball.x <= 0) {
+                ball.x = 0;
+                ball.speedX = Math.abs(ball.speedX) * bounceDamping;
+            }
+            if (ball.x + ball.size >= windowWidth) {
+                ball.x = windowWidth - ball.size;
+                ball.speedX = -Math.abs(ball.speedX) * bounceDamping;
+            }
+            
+            // Reset football if it falls below screen
+            if (ball.y > windowHeight + 100) {
+                ball.y = -ball.size - Math.random() * 200;
+                ball.x = Math.random() * windowWidth;
+                ball.speedY = Math.random() * 2 + 1;
+                ball.speedX = (Math.random() - 0.5) * 2;
+                ball.rotationSpeed = (Math.random() - 0.5) * 5;
+            }
+            
+            // Reset if goes too far sideways
+            if (Math.abs(ball.x) > windowWidth + 200) {
+                ball.x = Math.random() * windowWidth;
+                ball.speedX = (Math.random() - 0.5) * 2;
+            }
+            
+            // Update element position
+            ball.element.style.transform = `translate(${ball.x}px, ${ball.y}px) rotate(${ball.rotation}deg)`;
+            ball.element.style.left = '0';
+            ball.element.style.top = '0';
+        });
+        
+        requestAnimationFrame(physicsLoop);
+    };
+    
+    requestAnimationFrame(physicsLoop);
+},
+
+flashBar: function(domEl, hitPosition) {
+    const barIndex = Math.floor(hitPosition * 40);
+    const bar = domEl.querySelector(`.graph${Math.min(barIndex, 40)}`);
+    
+    if (bar) {
+        const originalColor = bar.style.background;
+        bar.style.background = 'rgba(255, 215, 0, 1)'; // Gold flash
+        bar.style.boxShadow = '0 0 10px rgba(255, 215, 0, 0.8)';
+        
+        setTimeout(() => {
+            bar.style.background = originalColor;
+            bar.style.boxShadow = 'none';
+        }, 200);
+    }
+}
